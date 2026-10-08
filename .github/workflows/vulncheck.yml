@@ -1,0 +1,40 @@
+name: Vulnerability check
+
+# The released binary is what the images carry. Weekly, govulncheck checks the
+# code of the latest release with the Go version that release was built with.
+# A finding fails the run; the fix is a Go update, which go-update.yml releases.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out the latest release
+        id: release
+        run: |
+          latest="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)"
+          if [ -z "$latest" ]; then
+            echo "::notice::No release yet, the main branch is checked instead"
+          else
+            git checkout --quiet "$latest"
+            echo "Checking ${latest}"
+          fi
+
+      - name: govulncheck
+        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+        with:
+          go-version-file: go.mod
+          go-package: ./...
