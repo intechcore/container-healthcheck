@@ -1,0 +1,206 @@
+name: CI
+
+# Lint, unit tests and the container test on amd64 and arm64, SonarCloud with the
+# coverage of the unit tests, and the Trivy scan of the image. Every pull request
+# runs it, and main after a merge.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A new push to a pull request cancels its older run. Runs on main finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          # No dependencies to cache, and a cache next to an image build invites poisoning
+          cache: false
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "${unformatted}" ]; then
+            echo "::error::Not formatted with gofmt: ${unformatted}"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: staticcheck
+        uses: dominikh/staticcheck-action@9716614d4101e79b4340dd97b10e54d68234e431 # v1.4.1
+        with:
+          install-go: false
+          version: 2026.2.1
+
+      # Known vulnerabilities in the code paths the binary reaches, the Go standard
+      # library included. A Go update with a fix turns this green again.
+      - name: govulncheck
+        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+        with:
+          go-version-file: go.mod
+          go-package: ./...
+
+      - name: ShellCheck
+        uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # 2.0.0
+        with:
+          scandir: .
+          severity: warning
+          # renovate: datasource=github-releases depName=koalaman/shellcheck
+          version: v0.11.0
+
+      - name: Hadolint
+        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
+        with:
+          dockerfile: Dockerfile
+
+      - name: Hadolint (sample service)
+        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
+        with:
+          dockerfile: tests/container/Dockerfile.sample
+
+      # Checks the workflows themselves: expressions, inputs, shell in run.
+      - name: actionlint
+        uses: docker://rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+
+      # Security audit of the workflows, for example template injection or
+      # credentials left in the checkout. Informational findings do not fail.
+      - name: zizmor
+        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        with:
+          advanced-security: false
+          min-severity: low
+          version: 1.30.1
+
+      # Misconfigurations in the Dockerfiles, before any image is built.
+      - name: Trivy config scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          exit-code: '1'
+          severity: HIGH,CRITICAL
+
+  # Unit tests and the container test, each architecture on a native runner.
+  test:
+    name: test (${{ matrix.arch }})
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          # No dependencies to cache, and a cache next to an image build invites poisoning
+          cache: false
+
+      - name: Unit tests
+        run: go test -race -count=1 -coverprofile=coverage.out ./...
+
+      - name: Keep the coverage for SonarCloud
+        if: matrix.arch == 'amd64'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 1
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build the image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: container-healthcheck:test
+          platforms: linux/${{ matrix.arch }}
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+
+      - name: Container test
+        run: tests/container/test.sh container-healthcheck:test
+
+  sonar:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: coverage
+
+      - name: SonarCloud scan
+        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.qualitygate.wait=true
+
+  # Vulnerabilities in the image, which are those of the Go standard library the
+  # binary was built with. CRITICAL fails the build. HIGH goes to a tracking issue.
+  trivy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build the image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: container-healthcheck:scan
+
+      - name: Run Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: container-healthcheck:scan
+          format: json
+          output: trivy-results.json
+          exit-code: '0'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      # Summary, tracking issue on push, and failure on CRITICAL. The same
+      # action lives in each intechcore image repository.
+      - name: Report the findings
+        uses: ./.github/actions/trivy-report
+        with:
+          report: ${{ github.event_name == 'push' }}
+          token: ${{ github.token }}
