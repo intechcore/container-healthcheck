@@ -8,12 +8,14 @@ set -euo pipefail
 image="${1:-container-healthcheck:test}"
 sample="container-healthcheck-sample:test"
 root="$(cd "$(dirname "$0")/../.." && pwd)"
+context="$(mktemp -d)"
 containers=()
 
 cleanup() {
     if [[ "${#containers[@]}" -gt 0 ]]; then
         docker rm -f "${containers[@]}" >/dev/null 2>&1 || true
     fi
+    rm -rf "${context}"
 }
 trap cleanup EXIT
 
@@ -44,8 +46,11 @@ version="$(docker run --rm "${image}" --version)"
 [[ -n "${version}" ]] || fail "the image prints no version"
 echo "ok: the image runs, version ${version}"
 
-docker build --tag "${sample}" --build-arg "HEALTHCHECK_IMAGE=${image}" \
-    --file "${root}/tests/container/Dockerfile.sample" "${root}/tests/container"
+# The binary of the image under test goes into the build context of the sample
+extract="$(docker create "${image}")"
+containers+=("${extract}")
+docker cp "${extract}:/container-healthcheck" "${context}/container-healthcheck"
+docker build --tag "${sample}" --file "${root}/tests/container/Dockerfile.sample" "${context}"
 
 healthy="$(docker run --detach "${sample}")"
 containers+=("${healthy}")
