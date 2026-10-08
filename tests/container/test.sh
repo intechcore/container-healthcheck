@@ -8,12 +8,14 @@ set -euo pipefail
 image="${1:-container-healthcheck:test}"
 sample="container-healthcheck-sample:test"
 root="$(cd "$(dirname "$0")/../.." && pwd)"
+context="$(mktemp -d)"
 containers=()
 
 cleanup() {
-    if [ "${#containers[@]}" -gt 0 ]; then
+    if [[ "${#containers[@]}" -gt 0 ]]; then
         docker rm -f "${containers[@]}" >/dev/null 2>&1 || true
     fi
+    rm -rf "${context}"
 }
 trap cleanup EXIT
 
@@ -27,7 +29,7 @@ health_of() {
     local container="$1" status
     for _ in $(seq 1 60); do
         status="$(docker inspect --format '{{.State.Health.Status}}' "${container}")"
-        if [ "${status}" = "healthy" ] || [ "${status}" = "unhealthy" ]; then
+        if [[ "${status}" = "healthy" ]] || [[ "${status}" = "unhealthy" ]]; then
             echo "${status}"
             return
         fi
@@ -36,25 +38,28 @@ health_of() {
     echo "undecided"
 }
 
-if [ "$#" -eq 0 ]; then
+if [[ "$#" -eq 0 ]]; then
     docker build --tag "${image}" "${root}"
 fi
 
 version="$(docker run --rm "${image}" --version)"
-[ -n "${version}" ] || fail "the image prints no version"
+[[ -n "${version}" ]] || fail "the image prints no version"
 echo "ok: the image runs, version ${version}"
 
-docker build --tag "${sample}" --build-arg "HEALTHCHECK_IMAGE=${image}" \
-    --file "${root}/tests/container/Dockerfile.sample" "${root}/tests/container"
+# The binary of the image under test goes into the build context of the sample
+extract="$(docker create "${image}")"
+containers+=("${extract}")
+docker cp "${extract}:/container-healthcheck" "${context}/container-healthcheck"
+docker build --tag "${sample}" --file "${root}/tests/container/Dockerfile.sample" "${context}"
 
 healthy="$(docker run --detach "${sample}")"
 containers+=("${healthy}")
-[ "$(health_of "${healthy}")" = "healthy" ] || fail "the sample service is not healthy"
+[[ "$(health_of "${healthy}")" = "healthy" ]] || fail "the sample service is not healthy"
 echo "ok: a service image with the binary turns healthy"
 
 wrong_port="$(docker run --detach --env HEALTHCHECK_PORT=8081 "${sample}")"
 containers+=("${wrong_port}")
-[ "$(health_of "${wrong_port}")" = "unhealthy" ] || fail "a probe of the wrong port does not turn the service unhealthy"
+[[ "$(health_of "${wrong_port}")" = "unhealthy" ]] || fail "a probe of the wrong port does not turn the service unhealthy"
 docker inspect --format '{{range .State.Health.Log}}{{.Output}}{{end}}' "${wrong_port}" | grep -q "connection refused" \
     || fail "the health log does not name the reason"
 echo "ok: a probe of the wrong port turns it unhealthy, with the reason in the health log"
