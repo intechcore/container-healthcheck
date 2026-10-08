@@ -6,6 +6,8 @@ All notable changes to this project are recorded here. The format is based on
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-08
+
 ### Added
 - The `container-healthcheck` binary: asks a service on loopback whether it is healthy, over plain
   HTTP or over HTTPS that it verifies against the certificate the server is configured with.
