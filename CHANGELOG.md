@@ -1,0 +1,13 @@
+# Changelog
+
+All notable changes to this project are recorded here. The format is based on
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
+[Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
+
+### Added
+- The `container-healthcheck` binary: asks a service on loopback whether it is healthy, over plain
+  HTTP or over HTTPS that it verifies against the certificate the server is configured with.
+  Client certificates for mTLS, configuration by flags or environment, exit codes 0, 1 and 2.
+- The image `ghcr.io/intechcore/container-healthcheck`, `FROM scratch`, to copy the binary from.
