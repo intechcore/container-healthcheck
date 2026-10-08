@@ -1,4 +1,16 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>intechcore/renovate-config"]
+  "extends": ["github>intechcore/renovate-config"],
+  "packageRules": [
+    {
+      "description": "Renovate leaves the go directive of go.mod alone by default. CI sets Go up from it, so it has to move with the image.",
+      "matchDatasources": ["golang-version"],
+      "rangeStrategy": "bump"
+    },
+    {
+      "description": "One Go version for CI (go.mod) and the image (the golang build stage). Merging the group releases a patch through go-update.yml.",
+      "matchPackageNames": ["go", "golang"],
+      "groupName": "go"
+    }
+  ]
 }

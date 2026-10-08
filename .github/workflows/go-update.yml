@@ -1,0 +1,68 @@
+name: Go update
+
+# Every image that carries the binary reports the vulnerabilities of the Go
+# standard library it was built with. So a Go update releases by itself: when a
+# push to main changes the Go version, this workflow calls a patch release.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - go.mod
+      - Dockerfile
+
+permissions:
+  contents: read
+
+concurrency:
+  group: go-update
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      changed: ${{ steps.compare.outputs.changed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The version of the go directive and the tag of the golang build image.
+      # A change of either is a new toolchain for the binary.
+      - name: Compare the Go version with the previous commit
+        id: compare
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          go_versions() {
+            git show "$1:go.mod" | awk '$1 == "go" { print "go.mod " $2 }'
+            git show "$1:Dockerfile" | awk '$1 == "FROM" && $2 ~ /^golang:/ { split($2, ref, "@"); print "Dockerfile " ref[1] }'
+          }
+          if ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            echo "::notice::No previous commit to compare with"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          before="$(go_versions "$BEFORE")"
+          after="$(go_versions HEAD)"
+          echo "Before: ${before}"
+          echo "After:  ${after}"
+          if [ "$before" != "$after" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  release:
+    needs: check
+    if: needs.check.outputs.changed == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/bump-version.yml
+    with:
+      bump_type: patch
+    secrets:
+      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}

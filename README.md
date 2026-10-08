@@ -80,6 +80,23 @@ Consequences:
 The variable names follow a common convention: a service that reads its certificate from
 `TLS_CERT_FILE` needs no extra setting for the probe.
 
+## Releases and verification
+
+Every release publishes the image `ghcr.io/intechcore/container-healthcheck` for `linux/amd64` and
+`linux/arm64`, with the tags `<version>`, `<major>.<minor>` and `latest`, and the static binaries
+`container-healthcheck-linux-amd64` and `container-healthcheck-linux-arm64` as release assets. The
+binaries are copied out of the tested images. Releases carry an SPDX SBOM per architecture, the
+checksums in `SHA256SUMS` and signed build provenance.
+
+```sh
+gh attestation verify oci://ghcr.io/intechcore/container-healthcheck:<version> --owner intechcore
+gh attestation verify container-healthcheck-linux-amd64 --repo intechcore/container-healthcheck
+```
+
+A Go update releases a patch by itself: the image scans of every consumer report the
+vulnerabilities of the Go standard library the binary was built with. A weekly govulncheck checks
+the latest release.
+
 ## Build
 
 ```sh

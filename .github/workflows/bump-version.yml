@@ -1,0 +1,138 @@
+name: Bump Version & Release
+
+# The only way to release. It computes the next version from the latest v* tag,
+# moves the Unreleased entries of CHANGELOG.md into the release, commits, tags
+# and pushes. The tag starts release.yml. go-update.yml calls it for a patch
+# release when Go moves.
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: Version bump type
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+  workflow_call:
+    inputs:
+      bump_type:
+        required: true
+        type: string
+    secrets:
+      PAT_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+
+# Two releases at once would compute the same version
+concurrency:
+  group: bump-version
+  cancel-in-progress: false
+
+jobs:
+  bump-and-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      # ref: main, because a dispatch can start from any branch, while the steps
+      # below commit the release to main. Without it a dispatch from a feature
+      # branch would publish that branch as main.
+      #
+      # persist-credentials: false, so no token lands in .git/config. PAT_TOKEN
+      # reaches only the step that pushes.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      # A Go binary has no version file: the version lives in the tags, and the
+      # release passes it to the build. Before the first release it is 0.0.0.
+      - name: Get current version
+        id: current
+        run: |
+          latest="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)"
+          VERSION="${latest#v}"
+          VERSION="${VERSION:-0.0.0}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Current version: $VERSION"
+
+      - name: Calculate new version
+        id: new
+        env:
+          CURRENT_VERSION: ${{ steps.current.outputs.version }}
+          BUMP_TYPE: ${{ inputs.bump_type }}
+        run: |
+          IFS='.' read -r major minor patch <<< "$CURRENT_VERSION"
+          case "$BUMP_TYPE" in
+            major)
+              major=$((major + 1))
+              minor=0
+              patch=0
+              ;;
+            minor)
+              minor=$((minor + 1))
+              patch=0
+              ;;
+            patch)
+              patch=$((patch + 1))
+              ;;
+            *)
+              echo "::error::Unknown bump type: $BUMP_TYPE"
+              exit 1
+              ;;
+          esac
+          NEW_VERSION="${major}.${minor}.${patch}"
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "New version: $NEW_VERSION"
+
+      # The release workflow takes its notes from the section cut here.
+      - name: Move the Unreleased entries of CHANGELOG.md into the release
+        env:
+          NEW_VERSION: ${{ steps.new.outputs.version }}
+        run: .github/scripts/changelog-cut.sh "$NEW_VERSION"
+
+      # PAT_TOKEN, not GITHUB_TOKEN: a tag pushed with the default token starts
+      # no workflow, so the release workflow would never see it.
+      - name: Commit and tag
+        env:
+          NEW_VERSION: ${{ steps.new.outputs.version }}
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "chore: bump version to ${NEW_VERSION}"
+          git tag "v${NEW_VERSION}"
+          # The token reaches git through GIT_ASKPASS, so the remote URL holds no
+          # credential. A URL with the token would show in the process list and in
+          # the output of a failed push. The helper reads the token from the env.
+          # shellcheck disable=SC2016  # $PAT_TOKEN is read when the helper runs
+          printf '#!/bin/sh\nexec echo "$PAT_TOKEN"\n' > "$RUNNER_TEMP/askpass.sh"
+          chmod +x "$RUNNER_TEMP/askpass.sh"
+          export GIT_ASKPASS="$RUNNER_TEMP/askpass.sh"
+          REMOTE="https://x-access-token@github.com/${GITHUB_REPOSITORY}.git"
+          git push "$REMOTE" main
+          git push "$REMOTE" "v${NEW_VERSION}"
+
+      - name: Summary
+        env:
+          CURRENT_VERSION: ${{ steps.current.outputs.version }}
+          NEW_VERSION: ${{ steps.new.outputs.version }}
+        run: |
+          {
+            echo "## Release v${NEW_VERSION}"
+            echo ""
+            echo "Version bumped from \`${CURRENT_VERSION}\` to \`${NEW_VERSION}\`"
+            echo ""
+            echo "The [release workflow](../../actions/workflows/release.yml) will now:"
+            echo "- Build, test and push ghcr.io/intechcore/container-healthcheck:${NEW_VERSION}"
+            echo "- Create the GitHub release with the binaries, SBOMs and provenance"
+          } >> "$GITHUB_STEP_SUMMARY"
