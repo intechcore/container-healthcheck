@@ -1,0 +1,15 @@
+.git
+.github
+.idea
+.vscode
+tests
+*_test.go
+coverage.out
+CLAUDE.md
+README.md
+CHANGELOG.md
+CONTRIBUTING.md
+SECURITY.md
+renovate.json
+sonar-project.properties
+.DS_Store
