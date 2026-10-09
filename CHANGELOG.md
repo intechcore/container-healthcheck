@@ -6,6 +6,10 @@ All notable changes to this project are recorded here. The format is based on
 
 ## [Unreleased]
 
+### Security
+- Built with Go 1.27.2, which fixes CVE-2026-78667 and CVE-2026-97031 in the standard library.
+  Image scanners of every image that carries the binary report them for 0.1.0.
+
 ## [0.1.0] - 2026-10-08
 
 ### Added
