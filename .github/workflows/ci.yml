@@ -47,7 +47,6 @@ jobs:
         uses: dominikh/staticcheck-action@9716614d4101e79b4340dd97b10e54d68234e431 # v1.4.1
         with:
           install-go: false
-          # Go 1.27.2 changed the export data format. Staticcheck reads it from 2026.2.2 on.
           # renovate: datasource=github-releases depName=dominikh/go-tools
           version: 2026.2.2
 
