@@ -47,7 +47,9 @@ jobs:
         uses: dominikh/staticcheck-action@9716614d4101e79b4340dd97b10e54d68234e431 # v1.4.1
         with:
           install-go: false
-          version: 2026.2.1
+          # Go 1.27.2 changed the export data format. Staticcheck reads it from 2026.2.2 on.
+          # renovate: datasource=github-releases depName=dominikh/go-tools
+          version: 2026.2.2
 
       # Known vulnerabilities in the code paths the binary reaches, the Go standard
       # library included. A Go update with a fix turns this green again.
