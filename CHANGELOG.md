@@ -6,6 +6,10 @@ All notable changes to this project are recorded here. The format is based on
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-21
+
+- Maintenance release: dependency and CI updates.
+
 ## [0.1.2] - 2026-10-18
 
 - Maintenance release: dependency and CI updates.
