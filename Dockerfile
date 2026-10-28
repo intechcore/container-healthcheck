@@ -1,7 +1,7 @@
 # The image carries the static binary alone. It is not run on its own: other images copy
 # the binary in, COPY --from=ghcr.io/intechcore/container-healthcheck:<version>.
 
-FROM golang:1.27.3-trixie@sha256:c124b9ad3452f46061b5054607d26ea51730dae5372c5e469920063ba2bc6dcc AS build
+FROM golang:1.27.3-trixie@sha256:7b072c590a326b9d2a43b165ae247f6e8eafff32e1ad154ab97139e89f053be9 AS build
 
 WORKDIR /src
 COPY go.mod ./
